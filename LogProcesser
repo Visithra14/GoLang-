@@ -1,0 +1,80 @@
+package main
+
+import (
+    "bufio"
+    "fmt"
+    "os"
+    "strings"
+    "sync"
+)
+
+func ProcessLogs(in []string, out string) error {
+    var wg sync.WaitGroup
+    ch := make(chan string, 100)
+
+    for _, f := range in {
+        wg.Add(1)
+        go func(file string) {
+            defer wg.Done()
+            readErrs(file, ch)
+        }(f)
+    }
+
+    go func() {
+        wg.Wait()
+        close(ch)
+    }()
+
+    return writeErrs(out, ch)
+}
+
+func readErrs(file string, ch chan<- string) {
+    f, err := os.Open(file)
+    if err != nil {
+        fmt.Printf("Failed to open %s: %v\n", file, err)
+        return
+    }
+    defer f.Close()
+
+    sc := bufio.NewScanner(f)
+    for sc.Scan() {
+        l := sc.Text()
+        if strings.Contains(l, "ERROR") {
+            ch <- l
+        }
+    }
+
+    if err := sc.Err(); err != nil {
+        fmt.Printf("Error reading %s: %v\n", file, err)
+    }
+}
+
+func writeErrs(out string, ch <-chan string) error {
+    f, err := os.Create(out)
+    if err != nil {
+        return fmt.Errorf("failed to create %s: %v", out, err)
+    }
+    defer f.Close()
+
+    w := bufio.NewWriter(f)
+    defer w.Flush()
+
+    for l := range ch {
+        _, err := w.WriteString(l + "\n")
+        if err != nil {
+            return fmt.Errorf("write error: %v", err)
+        }
+    }
+
+    return nil
+}
+
+func main() {
+    in := []string{"server1.log", "server2.log", "server3.log"}
+    err := ProcessLogs(in, "errors.log")
+    if err != nil {
+        fmt.Println("Failed:", err)
+    } else {
+        fmt.Println("Errors written to errors.log")
+    }
+}
